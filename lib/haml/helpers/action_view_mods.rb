@@ -22,7 +22,12 @@ module Haml
 
       def output_buffer=(new_buffer)
         if is_haml?
-          if Haml::Util.rails_xss_safe? && new_buffer.is_a?(ActiveSupport::SafeBuffer)
+          # Rails 7.1+ uses ActionView::OutputBuffer which is no longer a SafeBuffer subclass.
+          # Strip SafeBuffer wrapping only when it is *actually* a SafeBuffer (not an
+          # ActionView::OutputBuffer), to avoid stomping on the Rails 7.1 buffer object.
+          if Haml::Util.rails_xss_safe? &&
+              new_buffer.is_a?(ActiveSupport::SafeBuffer) &&
+              !(defined?(ActionView::OutputBuffer) && new_buffer.is_a?(ActionView::OutputBuffer))
             new_buffer = String.new(new_buffer)
           end
           haml_buffer.buffer = new_buffer
@@ -43,6 +48,13 @@ module ActionView
           #double assignment is to avoid warnings
           _hamlout = _hamlout = eval('_hamlout', block.binding) # Necessary since capture_haml checks _hamlout
 
+          capture_haml(*args, &block)
+        elsif is_haml?
+          # Rails 7.1 changed ActionView::Base#capture to call @output_buffer.capture { yield }
+          # instead of with_output_buffer { yield }.  When a non-Haml block (e.g. turbo_frame_tag)
+          # is captured inside a Haml template, HAML's buffer is active but the block is not
+          # tagged as a Haml block.  We must capture from the Haml buffer rather than delegating
+          # to the Rails OutputBuffer#capture path, otherwise the block output is swallowed.
           capture_haml(*args, &block)
         else
           capture_without_haml(*args, &block)
