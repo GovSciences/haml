@@ -22,14 +22,22 @@ module Haml
 
       def output_buffer=(new_buffer)
         if is_haml?
-          # Rails 7.1+ uses ActionView::OutputBuffer which is no longer a SafeBuffer subclass.
-          # Strip SafeBuffer wrapping only when it is *actually* a SafeBuffer (not an
-          # ActionView::OutputBuffer), to avoid stomping on the Rails 7.1 buffer object.
-          if Haml::Util.rails_xss_safe? &&
-              new_buffer.is_a?(ActiveSupport::SafeBuffer) &&
-              !(defined?(ActionView::OutputBuffer) && new_buffer.is_a?(ActionView::OutputBuffer))
+          # Rails 7.1+ compiled template methods receive ActionView::OutputBuffer as a
+          # positional argument and the HAML preamble assigns it back via output_buffer=.
+          # If we let that replace haml_buffer.buffer, _erbout (captured before the
+          # assignment) diverges from the buffer HAML actually writes to, producing an
+          # empty partial. Instead, set @output_buffer directly via super so Rails
+          # internals stay consistent without touching the HAML buffer.
+          if defined?(ActionView::OutputBuffer) && new_buffer.is_a?(ActionView::OutputBuffer)
+            super
+            return
+          end
+
+          # Rails < 7.1 / SafeBuffer: strip to a plain String so HAML's buffer stays mutable.
+          if Haml::Util.rails_xss_safe? && new_buffer.is_a?(ActiveSupport::SafeBuffer)
             new_buffer = String.new(new_buffer)
           end
+
           haml_buffer.buffer = new_buffer
         else
           super
