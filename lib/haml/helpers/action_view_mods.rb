@@ -42,6 +42,23 @@ end
 
 module ActionView
   module Helpers
+    module CacheHelper
+      # Rails 7.1 changed write_fragment_for to capture the cached fragment via
+      # `output_buffer.capture(&block)`.  For Haml templates #output_buffer returns
+      # the raw Haml buffer String (see Haml::Helpers::ActionViewMods#output_buffer),
+      # which has no #capture, raising `undefined method 'capture' for an instance of
+      # String`.  Capture the fragment through Haml's own capture_haml instead so
+      # `cache`/`cache_if` blocks work inside Haml templates when perform_caching is on.
+      def write_fragment_for_with_haml(name, options, &block)
+        return write_fragment_for_without_haml(name, options, &block) unless is_haml?
+
+        fragment = capture_haml(&block)
+        controller.write_fragment(name, fragment, options)
+      end
+      alias_method :write_fragment_for_without_haml, :write_fragment_for
+      alias_method :write_fragment_for, :write_fragment_for_with_haml
+    end
+
     module CaptureHelper
       def capture_with_haml(*args, &block)
         if Haml::Helpers.block_is_haml?(block)
